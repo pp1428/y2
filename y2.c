@@ -21,6 +21,9 @@ char result[MAX_TERM_LEN];
 
 int solved;
 
+// ОПТИМИЗАЦИЯ 1: массив занятых цифр для проверки за O(1)
+static int used[10];
+
 int find_letter(char c) {
     for (int i = 0; i < nletters; i++)
         if (letters[i] == c) return i;
@@ -56,9 +59,11 @@ int check(void) {
     return sum == str_to_num(result);
 }
 
+// ОПТИМИЗАЦИЯ 1: ранний выход из рекурсии после нахождения решения
 void permute(int pos) {
+    if (solved) return;
     if (pos == nletters) {
-        if (!solved && check()) {
+        if (check()) {
             solved = 1;
             for (int i = 0; i < nletters; i++)
                 sol_digits[i] = digits[i];
@@ -66,12 +71,14 @@ void permute(int pos) {
         return;
     }
     for (int d = 0; d <= 9; d++) {
-        int taken = 0;
-        for (int k = 0; k < pos; k++)
-            if (digits[k] == d) { taken = 1; break; }
-        if (taken) continue;
+        // ОПТИМИЗАЦИЯ 1: проверка занятости цифры через массив used[]
+        if (used[d]) continue;
+        used[d] = 1;
         digits[pos] = d;
         permute(pos + 1);
+        used[d] = 0;
+        // ОПТИМИЗАЦИЯ 1: прерываем перебор, как только решение найдено
+        if (solved) return;
     }
 }
 
@@ -128,6 +135,9 @@ int main(void) {
         printf("Elapsed time: %.3f ms\n", ms);
         return 1;
     }
+
+    // ОПТИМИЗАЦИЯ 1: сброс массива занятых цифр перед стартом перебора
+    memset(used, 0, sizeof(used));
 
     solved = 0;
     permute(0);
