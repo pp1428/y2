@@ -33,6 +33,10 @@ static int term_len[MAX_TERMS];
 static int res_ids[MAX_TERM_LEN];
 static int res_len;
 
+// ОПТИМИЗАЦИЯ 4: коэффициент каждой буквы в линейном уравнении
+// sum(coef[i] * digits[i]) == 0  эквивалентно исходному равенству
+static long long coef[26];
+
 int find_letter(char c) {
     for (int i = 0; i < nletters; i++)
         if (letters[i] == c) return i;
@@ -55,13 +59,13 @@ int leading_ok(void) {
     return 1;
 }
 
-// ОПТИМИЗАЦИЯ 3: check теперь работает только с индексами
+// ОПТИМИЗАЦИЯ 4: проверка сводится к одному линейному уравнению
 int check(void) {
     if (!leading_ok()) return 0;
-    long long sum = 0;
-    for (int i = 0; i < nterms; i++)
-        sum += ids_to_num(term_ids[i], term_len[i]);
-    return sum == ids_to_num(res_ids, res_len);
+    long long s = 0;
+    for (int i = 0; i < nletters; i++)
+        s += coef[i] * digits[i];
+    return s == 0;
 }
 
 // ОПТИМИЗАЦИЯ 1: ранний выход из рекурсии после нахождения решения
@@ -137,6 +141,24 @@ void parse_line(void) {
     for (int t = 0; t < nterms; t++)
         is_leading[term_ids[t][0]] = 1;
     is_leading[res_ids[0]] = 1;
+
+    // ОПТИМИЗАЦИЯ 4: считаем коэффициенты букв в линейном уравнении
+    // coef[буква] = (сумма весов этой буквы во всех слагаемых) - (вес в результате)
+    memset(coef, 0, sizeof(coef));
+    for (int t = 0; t < nterms; t++) {
+        long long w = 1;
+        for (int j = term_len[t] - 1; j >= 0; j--) {
+            coef[term_ids[t][j]] += w;
+            w *= 10;
+        }
+    }
+    {
+        long long w = 1;
+        for (int j = res_len - 1; j >= 0; j--) {
+            coef[res_ids[j]] -= w;
+            w *= 10;
+        }
+    }
 }
 
 int main(void) {
