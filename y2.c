@@ -24,6 +24,9 @@ int solved;
 // ОПТИМИЗАЦИЯ 1: массив занятых цифр для проверки за O(1)
 static int used[10];
 
+// ОПТИМИЗАЦИЯ 2: признак того, что буква стоит первой в каком-либо слагаемом/результате
+static int is_leading[26];
+
 int find_letter(char c) {
     for (int i = 0; i < nletters; i++)
         if (letters[i] == c) return i;
@@ -73,6 +76,8 @@ void permute(int pos) {
     for (int d = 0; d <= 9; d++) {
         // ОПТИМИЗАЦИЯ 1: проверка занятости цифры через массив used[]
         if (used[d]) continue;
+        // ОПТИМИЗАЦИЯ 2: не разрешаем 0 для буквы, стоящей в начале числа
+        if (d == 0 && is_leading[pos]) continue;
         used[d] = 1;
         digits[pos] = d;
         permute(pos + 1);
@@ -113,6 +118,12 @@ void parse_line(void) {
             if (!found && nletters < 26) letters[nletters++] = c;
         }
     }
+
+    // ОПТИМИЗАЦИЯ 2: отмечаем буквы, которые стоят на первом месте в числах
+    memset(is_leading, 0, sizeof(is_leading));
+    for (int t = 0; t < nterms; t++)
+        is_leading[find_letter(terms[t][0])] = 1;
+    is_leading[find_letter(result[0])] = 1;
 }
 
 int main(void) {
