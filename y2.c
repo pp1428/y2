@@ -27,39 +27,41 @@ static int used[10];
 // ОПТИМИЗАЦИЯ 2: признак того, что буква стоит первой в каком-либо слагаемом/результате
 static int is_leading[26];
 
+// ОПТИМИЗАЦИЯ 3: заранее вычисленные индексы букв в массиве letters[] для каждой строки
+static int term_ids[MAX_TERMS][MAX_TERM_LEN];
+static int term_len[MAX_TERMS];
+static int res_ids[MAX_TERM_LEN];
+static int res_len;
+
 int find_letter(char c) {
     for (int i = 0; i < nletters; i++)
         if (letters[i] == c) return i;
     return -1;
 }
 
-long long str_to_num(char *s) {
+// ОПТИМИЗАЦИЯ 3: работаем по массиву индексов, без вызовов find_letter
+long long ids_to_num(const int *ids, int len) {
     long long n = 0;
-    int len = (int)strlen(s);
-    for (int i = 0; i < len; i++) {
-        int idx = find_letter(s[i]);
-        n = n * 10 + digits[idx];
-    }
+    for (int i = 0; i < len; i++)
+        n = n * 10 + digits[ids[i]];
     return n;
 }
 
+// ОПТИМИЗАЦИЯ 3: проверка ведущих нулей через предвычисленные индексы
 int leading_ok(void) {
-    for (int i = 0; i < nletters; i++) {
-        if (digits[i] != 0) continue;
-        char c = letters[i];
-        for (int t = 0; t < nterms; t++)
-            if (terms[t][0] == c) return 0;
-        if (result[0] == c) return 0;
-    }
+    for (int t = 0; t < nterms; t++)
+        if (digits[term_ids[t][0]] == 0) return 0;
+    if (digits[res_ids[0]] == 0) return 0;
     return 1;
 }
 
+// ОПТИМИЗАЦИЯ 3: check теперь работает только с индексами
 int check(void) {
     if (!leading_ok()) return 0;
     long long sum = 0;
     for (int i = 0; i < nterms; i++)
-        sum += str_to_num(terms[i]);
-    return sum == str_to_num(result);
+        sum += ids_to_num(term_ids[i], term_len[i]);
+    return sum == ids_to_num(res_ids, res_len);
 }
 
 // ОПТИМИЗАЦИЯ 1: ранний выход из рекурсии после нахождения решения
@@ -119,11 +121,22 @@ void parse_line(void) {
         }
     }
 
+    // ОПТИМИЗАЦИЯ 3: один раз строим массивы индексов букв для каждой строки
+    for (int t = 0; t < nterms; t++) {
+        term_len[t] = (int)strlen(terms[t]);
+        for (int j = 0; j < term_len[t]; j++)
+            term_ids[t][j] = find_letter(terms[t][j]);
+    }
+    res_len = (int)strlen(result);
+    for (int j = 0; j < res_len; j++)
+        res_ids[j] = find_letter(result[j]);
+
     // ОПТИМИЗАЦИЯ 2: отмечаем буквы, которые стоят на первом месте в числах
     memset(is_leading, 0, sizeof(is_leading));
+    // ОПТИМИЗАЦИЯ 3: используем уже готовые индексы вместо повторного find_letter
     for (int t = 0; t < nterms; t++)
-        is_leading[find_letter(terms[t][0])] = 1;
-    is_leading[find_letter(result[0])] = 1;
+        is_leading[term_ids[t][0]] = 1;
+    is_leading[res_ids[0]] = 1;
 }
 
 int main(void) {
