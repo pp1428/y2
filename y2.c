@@ -4,7 +4,7 @@
 #include <time.h>
 
 #define MAX_LINE 4096
-#define MAX_TERMS 8
+#define MAX_TERMS 32
 #define MAX_TERM_LEN 64
 
 char line[MAX_LINE];
@@ -15,27 +15,22 @@ int  nletters;
 int  digits[26];
 int  sol_digits[26];
 
-char terms[MAX_TERMS][MAX_TERM_LEN];
+char term_str[MAX_TERMS][MAX_TERM_LEN];
+char term_op[MAX_TERMS];   /* оператор ПЕРЕД term_str[i]; term_op[0] не используется */
 int  nterms;
-char result[MAX_TERM_LEN];
+int  eq_index = -1;
 
 int solved;
 
-// ОПТИМИЗАЦИЯ 1: массив занятых цифр для проверки за O(1)
+/* ОПТИМИЗАЦИЯ 1: массив занятых цифр */
 static int used[10];
 
-// ОПТИМИЗАЦИЯ 2: признак того, что буква стоит первой в каком-либо слагаемом/результате
+/* ОПТИМИЗАЦИЯ 2: буква стоит первой в каком-либо числе */
 static int is_leading[26];
 
-// ОПТИМИЗАЦИЯ 3: заранее вычисленные индексы букв в массиве letters[] для каждой строки
+/* ОПТИМИЗАЦИЯ 3: заранее вычисленные индексы букв */
 static int term_ids[MAX_TERMS][MAX_TERM_LEN];
-static int term_len[MAX_TERMS];
-static int res_ids[MAX_TERM_LEN];
-static int res_len;
-
-// ОПТИМИЗАЦИЯ 4: коэффициент каждой буквы в линейном уравнении
-// sum(coef[i] * digits[i]) == 0  эквивалентно исходному равенству
-static long long coef[26];
+static int term_len_arr[MAX_TERMS];
 
 int find_letter(char c) {
     for (int i = 0; i < nletters; i++)
@@ -43,7 +38,6 @@ int find_letter(char c) {
     return -1;
 }
 
-// ОПТИМИЗАЦИЯ 3: работаем по массиву индексов, без вызовов find_letter
 long long ids_to_num(const int *ids, int len) {
     long long n = 0;
     for (int i = 0; i < len; i++)
@@ -51,24 +45,61 @@ long long ids_to_num(const int *ids, int len) {
     return n;
 }
 
-// ОПТИМИЗАЦИЯ 3: проверка ведущих нулей через предвычисленные индексы
 int leading_ok(void) {
     for (int t = 0; t < nterms; t++)
-        if (digits[term_ids[t][0]] == 0) return 0;
-    if (digits[res_ids[0]] == 0) return 0;
+        if (term_len_arr[t] > 0 && digits[term_ids[t][0]] == 0) return 0;
     return 1;
 }
 
-// ОПТИМИЗАЦИЯ 4: проверка сводится к одному линейному уравнению
-int check(void) {
-    if (!leading_ok()) return 0;
-    long long s = 0;
-    for (int i = 0; i < nletters; i++)
-        s += coef[i] * digits[i];
-    return s == 0;
+/* Вычисление одной стороны выражения: термины [start, end).
+   Учитывает приоритеты: сначала * и /, потом + и -.
+   При делении с остатком или делении на 0 возвращает *ok = 0. */
+long long eval_side(int start, int end, int *ok) {
+    *ok = 1;
+    long long total = 0;
+    long long cur = 0;
+    int cur_sign = 1;
+    int first = 1;
+
+    for (int i = start; i < end; i++) {
+        long long val = ids_to_num(term_ids[i], term_len_arr[i]);
+        if (first) {
+            cur = val;
+            first = 0;
+        } else {
+            char op = term_op[i];
+            if (op == '+') {
+                total += cur_sign * cur;
+                cur_sign = 1;
+                cur = val;
+            } else if (op == '-') {
+                total += cur_sign * cur;
+                cur_sign = -1;
+                cur = val;
+            } else if (op == '*') {
+                cur *= val;
+            } else if (op == '/') {
+                if (val == 0 || cur % val != 0) { *ok = 0; return 0; }
+                cur /= val;
+            }
+        }
+    }
+    total += cur_sign * cur;
+    return total;
 }
 
-// ОПТИМИЗАЦИЯ 1: ранний выход из рекурсии после нахождения решения
+int check(void) {
+    if (!leading_ok()) return 0;
+    if (eq_index < 0)  return 0;
+
+    int ok;
+    long long left  = eval_side(0, eq_index, &ok);
+    if (!ok) return 0;
+    long long right = eval_side(eq_index, nterms, &ok);
+    if (!ok) return 0;
+    return left == right;
+}
+
 void permute(int pos) {
     if (solved) return;
     if (pos == nletters) {
@@ -80,15 +111,12 @@ void permute(int pos) {
         return;
     }
     for (int d = 0; d <= 9; d++) {
-        // ОПТИМИЗАЦИЯ 1: проверка занятости цифры через массив used[]
         if (used[d]) continue;
-        // ОПТИМИЗАЦИЯ 2: не разрешаем 0 для буквы, стоящей в начале числа
         if (d == 0 && is_leading[pos]) continue;
         used[d] = 1;
         digits[pos] = d;
         permute(pos + 1);
         used[d] = 0;
-        // ОПТИМИЗАЦИЯ 1: прерываем перебор, как только решение найдено
         if (solved) return;
     }
 }
@@ -96,28 +124,32 @@ void permute(int pos) {
 void parse_line(void) {
     nterms = 0;
     nletters = 0;
+    eq_index = -1;
 
     char buf[MAX_TERM_LEN];
     int  len = 0;
-    int  phase = 0;
+    char last_op = 0;
 
     for (int i = 0; ; i++) {
         char c = line[i];
-        if (c == '\0' || c == ' ' || c == '+' || c == '=') {
+        int is_op = (c == '+' || c == '-' || c == '*' || c == '/' || c == '=');
+
+        if (c == '\0' || c == ' ' || c == '\t' || is_op) {
             if (len > 0) {
                 buf[len] = '\0';
-                if (phase == 0) {
-                    if (nterms < MAX_TERMS)
-                        strcpy(terms[nterms++], buf);
-                } else {
-                    strcpy(result, buf);
+                if (nterms < MAX_TERMS) {
+                    strcpy(term_str[nterms], buf);
+                    term_op[nterms] = last_op;
+                    if (last_op == '=') eq_index = nterms;
+                    nterms++;
                 }
                 len = 0;
             }
-            if (c == '=') phase = 1;
+            if (is_op) last_op = c;
             if (c == '\0') break;
         } else {
-            buf[len++] = c;
+            if (len < MAX_TERM_LEN - 1)
+                buf[len++] = c;
             int found = 0;
             for (int j = 0; j < nletters; j++)
                 if (letters[j] == c) { found = 1; break; }
@@ -125,44 +157,22 @@ void parse_line(void) {
         }
     }
 
-    // ОПТИМИЗАЦИЯ 3: один раз строим массивы индексов букв для каждой строки
+    /* ОПТИМИЗАЦИЯ 3: строим массивы индексов */
     for (int t = 0; t < nterms; t++) {
-        term_len[t] = (int)strlen(terms[t]);
-        for (int j = 0; j < term_len[t]; j++)
-            term_ids[t][j] = find_letter(terms[t][j]);
+        term_len_arr[t] = (int)strlen(term_str[t]);
+        for (int j = 0; j < term_len_arr[t]; j++)
+            term_ids[t][j] = find_letter(term_str[t][j]);
     }
-    res_len = (int)strlen(result);
-    for (int j = 0; j < res_len; j++)
-        res_ids[j] = find_letter(result[j]);
 
-    // ОПТИМИЗАЦИЯ 2: отмечаем буквы, которые стоят на первом месте в числах
+    /* ОПТИМИЗАЦИЯ 2: отмечаем ведущие буквы */
     memset(is_leading, 0, sizeof(is_leading));
-    // ОПТИМИЗАЦИЯ 3: используем уже готовые индексы вместо повторного find_letter
     for (int t = 0; t < nterms; t++)
-        is_leading[term_ids[t][0]] = 1;
-    is_leading[res_ids[0]] = 1;
-
-    // ОПТИМИЗАЦИЯ 4: считаем коэффициенты букв в линейном уравнении
-    // coef[буква] = (сумма весов этой буквы во всех слагаемых) - (вес в результате)
-    memset(coef, 0, sizeof(coef));
-    for (int t = 0; t < nterms; t++) {
-        long long w = 1;
-        for (int j = term_len[t] - 1; j >= 0; j--) {
-            coef[term_ids[t][j]] += w;
-            w *= 10;
-        }
-    }
-    {
-        long long w = 1;
-        for (int j = res_len - 1; j >= 0; j--) {
-            coef[res_ids[j]] -= w;
-            w *= 10;
-        }
-    }
+        if (term_len_arr[t] > 0)
+            is_leading[term_ids[t][0]] = 1;
 }
 
 int main(void) {
-    printf("Enter cryptarithm (e.g. SEND + MORE = MONEY): ");
+    printf("Enter cryptarithm (e.g. SEND + MORE = MONEY or AB * CD = EFGH): ");
     fflush(stdout);
 
     if (scanf(" %4095[^\n]", line) != 1) {
@@ -174,6 +184,11 @@ int main(void) {
 
     parse_line();
 
+    if (eq_index < 0) {
+        printf("No '=' found in expression.\n");
+        return 1;
+    }
+
     if (nletters > 10) {
         printf("Too many unique letters (>10), no solution possible.\n");
         clock_t end = clock();
@@ -182,24 +197,18 @@ int main(void) {
         return 1;
     }
 
-    // ОПТИМИЗАЦИЯ 1: сброс массива занятых цифр перед стартом перебора
     memset(used, 0, sizeof(used));
-
     solved = 0;
     permute(0);
 
     if (solved) {
         for (int i = 0; i < nterms; i++) {
-            for (int j = 0; terms[i][j]; j++) {
-                int idx = find_letter(terms[i][j]);
+            for (int j = 0; term_str[i][j]; j++) {
+                int idx = find_letter(term_str[i][j]);
                 printf("%d", sol_digits[idx]);
             }
-            if (i < nterms - 1) printf(" + ");
-        }
-        printf(" = ");
-        for (int j = 0; result[j]; j++) {
-            int idx = find_letter(result[j]);
-            printf("%d", sol_digits[idx]);
+            if (i < nterms - 1)
+                printf(" %c ", term_op[i + 1]);
         }
         printf("\n");
     } else {
